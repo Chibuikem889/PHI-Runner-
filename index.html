@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>PHI RUNNER</title>
+  <style>
+    :root {
+      --bg: #000;
+      --fg: #fff;
+      --orange: #FF6B00;
+      --gold: #FFD166;
+      --gold-2: #FFB703;
+      --muted: rgba(255,255,255,0.7);
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Space Mono", "SFMono-Regular", Consolas, monospace;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      overscroll-behavior: none;
+    }
+
+    canvas {
+      position: fixed;
+      inset: 0;
+      display: block;
+      width: 100vw;
+      height: 100vh;
+      background: var(--bg);
+    }
+
+    #hud {
+      position: fixed;
+      inset: 0 0 auto 0;
+      height: 72px;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      padding: 18px 22px 0 22px;
+      pointer-events: none;
+      z-index: 10;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    #phiCounter {
+      color: var(--orange);
+      text-shadow: 0 0 16px rgba(255,107,0,0.8);
+    }
+
+    #levelName {
+      text-align: center;
+      color: rgba(255,255,255,0.9);
+      text-shadow: 0 0 12px rgba(255,255,255,0.35);
+    }
+
+    #progress {
+      text-align: right;
+      color: rgba(255,255,255,0.9);
+    }
+
+    #overlay {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 20;
+      pointer-events: none;
+      background: rgba(0,0,0,0.18);
+    }
+
+    #overlay.hidden {
+      display: none;
+    }
+
+    .panel {
+      pointer-events: auto;
+      min-width: 320px;
+      max-width: 80vw;
+      border: 1px solid rgba(255,255,255,0.4);
+      background: rgba(0,0,0,0.52);
+      color: white;
+      padding: 18px 22px;
+      text-align: center;
+      box-shadow: 0 0 40px rgba(255,255,255,0.08);
+    }
+
+    .panel h2 {
+      margin: 0 0 10px 0;
+      font-size: clamp(18px, 3vw, 34px);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--orange);
+    }
+
+    .panel p {
+      margin: 8px 0;
+      font-size: 12px;
+      line-height: 1.8;
+      letter-spacing: 0.08em;
+      color: rgba(255,255,255,0.8);
+      text-transform: uppercase;
+    }
+
+    button {
+      margin-top: 16px;
+      appearance: none;
+      border: 1px solid rgba(255,255,255,0.5);
+      background: rgba(255,255,255,0.02);
+      color: white;
+      padding: 12px 22px;
+      font: inherit;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    button:hover {
+      background: rgba(255,255,255,0.08);
+      transform: translateY(-1px);
+      box-shadow: 0 0 18px rgba(255,255,255,0.12);
+    }
+
+    #resetButton {
+      display: none;
+      position: fixed;
+      left: 50%;
+      bottom: 32px;
+      transform: translateX(-50%);
+      z-index: 30;
+      pointer-events: auto;
+    }
+
+    #resetButton.visible {
+      display: inline-block;
+    }
+
+    @media (max-width: 640px) {
+      #hud {
+        font-size: 10px;
+        letter-spacing: 0.08em;
+        padding: 14px 14px 0 14px;
+      }
+
+      .panel {
+        min-width: 84vw;
+        padding: 16px 16px;
+      }
+
+      .panel p {
+        font-size: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+
+  <div id="hud">
+    <div id="phiCounter">φ x <span id="phiValue">0</span></div>
+    <div id="levelName">LEVEL 0: 1+1+1...</div>
+    <div id="progress">0%</div>
+  </div>
+
+  <div id="overlay">
+    <div class="panel">
+      <h2>PHI RUNNER</h2>
+      <p>Collect the golden φ</p>
+      <p>Jump, run, survive, unlock the ratio</p>
+    </div>
+  </div>
+
+  <button id="resetButton">PLAY AGAIN</button>
+
+  <script>
+    (function () {
+      const canvas = document.getElementById("gameCanvas");
+      const ctx = canvas.getContext("2d");
+      const hudPhi = document.getElementById("phiValue");
+      const hudLevel = document.getElementById("levelName");
+      const hudProgress = document.getElementById("progress");
+      const overlay = document.getElementById("overlay");
+      const resetButton = document.getElementById("resetButton");
+
+      const phi = (1 + Math.sqrt(5)) / 2;
+
+      let width = 0, height = 0, dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+      const keys = {
+        left: false,
+        right: false
+      };
+
+      const game = {
+        levelIndex: 0,
+        levelName: "",
+        totalPhi: 0,
+        levelPhi: 0,
+        levelClearTimer: 0,
+        cameraShake: 0,
+        winScreen: false,
+        isRunning: true,
+        worldZoom: 1,
+        worldOffsetX: 0,
+        worldOffsetY: 0
+      };
+
+      const player = {
+        x: 120,
+        y: 0,
+        w: 18,
+        h: 42,
+        vx: 0,
+        vy: 0,
+        speed: 3.5,
+        jumpStrength: 10.8,
+        gravity: 0.6,
+        grounded: false,
+        facing: 1,
+        throwCooldown: 0,
+        frame: 0,
+        color: "#FF6B00"
+      };
+
+      let platforms = [];
+      let collectibles = [];
+      let particles = [];
+      let projectiles = [];
+      let boss = null;
+      let bossTarget = null;
+      let bossDestroyed = false;
+      let bossDefeatTime = 0;
+      let stageIntroTimer = 0;
+
+      function resize() {
+        width = window.innerWidth;
+        height = window.innerHeight;
+        canvas.width = Math.round(width * dpr);
+        canvas.height = Math.round(height * dpr);
+        canvas.style.width = width + "px";
+        canvas.style.height = height + "px";
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
+      function clamp(v, min, max) {
+        return Math.min(max, Math.max(min, v));
+      }
+
+      function rand(min, max) {
+        return min + Math.random() * (max - min);
+      }
+
+      function resetGame() {
+        game.levelIndex = 0;
+        game.totalPhi = 0;
+        game.levelPhi = 0;
+        game.winScreen = false;
+        game.levelClearTimer = 0;
+        game.cameraShake = 0;
+        game.worldZoom = 1;
+        overlay.classList.remove("hidden");
+        resetButton.classList.remove("visible");
+        startLevel(0);
+      }
+
+      function setOverlay(textTitle, textLines, show) {
+        const panel = overlay.querySelector(".panel");
+        panel.innerHTML = "";
+        const h2 = document.createElement("h2");
+        h2.textContent = textTitle;
+        panel.appendChild(h2);
+
+        if (Array.isArray(textLines)) {
+          textLines.forEach(line => {
+            const p = document.createElement("p");
+            p.textContent = line;
+            panel.appendChild(p);
+          });
+        }
+      }
+
+      function updateHud() {
+        hudPhi.textContent = String(game.totalPhi);
+        hudLevel.textContent = "LEVEL " + (game.levelIndex + 1) + ": " + game.levelName;
+        const pct = Math.min(100, Math.round((game.levelPhi / 5) * 100));
+        hudProgress.textContent = pct + "%";
+      }
+
+      function triggerShake(amount) {
+        game.cameraShake = Math.max(game.cameraShake, amount);
+      }
+
+      function spawnParticles(x, y, color, count = 12, speed = 2.2) {
+        for (let i = 0; i < count; i++) {
+          particles.push({
+            x, y,
+            vx: rand(-speed, speed),
+            vy: rand(-speed, speed),
+            life: rand(24, 52),
+            maxLife: rand(24, 52),
+            color,
+            size: rand(2, 5)
+          });
+        }
+      }
+
+      function addCollectible(x, y) {
+        collectibles.push({ x, y, r: 14, bob: rand(0, 1000), collected: false, glow: rand(0, 100) });
+      }
+
+      function makePlatform(x, y, w, h, label = "", fill = "rgba(255,255,255,0.02)", stroke = "#fff", angle = 0, type = "rect") {
+        return { x, y, w, h, label, fill, stroke, angle, type };
+      }
+
+      function initLevel0() {
+        platforms = [
+          makePlatform(0, height - 64, width + 600, 80, "", "rgba(255,255,255,0.02)", "#fff", 0, "ground")
+        ];
+        collectibles = [];
+        const positions = [
+          [180, height - 170],
+          [340, height - 230],
+          [520, height - 190],
+          [760, height - 230],
+          [980, height - 180],
+          [1180, height - 240]
+        ];
+        positions.forEach(([x, y], i) => addCollectible(x, y + (i % 2) * 20));
+        player.x = 80;
+        player.y = height - 110;
+        player.vx = 0;
+        player.vy = 0;
+        player.grounded = true;
+        player.gravity = 0.6;
+        game.worldZoom = 1;
+        game.worldOffsetX = 0;
+        game.worldOffsetY = 0;
+      }
+
+      function initLevel1() {
+        // Spiral platforms: golden squares that grow in size
+        const cx = 600;
+        const cy = 380;
+        platforms = [];
+        const count = 7;
+        for (let i = 0; i < count; i++) {
+          const t = i * 0.95;
+          const radius = 80 + i * 68;
+          const x = cx + Math.cos(t) * radius;
+          const y = cy + Math.sin(t) * radius;
+          const size = 54 + i * 16;
+          platforms.push(makePlatform(x - size / 2, y - size / 2, size, size, "φ", "rgba(255, 107, 0, 0.12)", "#fff", 0, "spiral"));
+        }
+        collectibles = [];
+        for (let i = 0; i < 5; i++) {
+          const ang = i * 1.1 + 0.7;
+          const dist = 130 + i * 80;
+          const px = cx + Math.cos(ang) * dist;
+          const py = cy + Math.sin(ang) * dist - 22;
+          addCollectible(px, py);
+        }
+        player.x = cx - 220;
+        player.y = cy + 180;
+        player.vx = 0;
+        player.vy = 0;
+        player.grounded = false;
+        player.gravity = 0.6;
+        game.worldZoom = 1;
+      }
+
+      function initLevel2() {
+        // Floating golden rectangles and some doors
+        platforms = [
+          makePlatform(140, height - 120, 230, 28, "φ", "rgba(255,107,0,0.12)", "#fff", 0, "rect"),
+          makePlatform(420, height - 200, 180, 26, "φ", "rgba(255,107,0,0.12)", "#fff", 0, "rect"),
+          makePlatform(720, height - 140, 210, 30, "φ", "rgba(255,107,0,0.12)", "#fff", 0, "rect"),
+          makePlatform(990, height - 250, 150, 22, "φ", "rgba(255,107,0,0.12)", "#fff", 0, "rect"),
+          makePlatform(1180, height - 180, 150, 26, "φ", "rgba(255,107,0,0.12)", "#fff", 0, "rect"),
+          makePlatform(540, height - 320, 26, 190, "φ", "rgba(255,107,0,0.12)", "#fff", 0, "door"),
+          makePlatform(900, height - 340, 26, 220, "φ", "rgba(255,107,0,0.12)", "#fff", 0, "door"),
+          makePlatform(1050, height - 400, 260, 22, "φ", "rgba(255,107,0,0.12)", "#fff", 0, "slope") // actually angled later
+        ];
+
+        // slope platform with 67 degree marker
+        const slope = platforms[platforms.length - 1];
+        slope.type = "slope";
+        slope.angle = 67 * Math.PI / 180;
+        slope.x = 1040;
+        slope.y = 370;
+        slope.w = 240;
+        slope.h = 24;
+
+        collectibles = [];
+        const pts = [
+          [220, height - 220],
+          [500, height - 270],
+          [780, height - 210],
+          [1030, height - 330],
+          [1270, height - 250],
+          [1400, height - 180]
+        ];
+        pts.forEach(([x, y]) => addCollectible(x, y));
+
+        player.x = 80;
+        player.y = height - 120;
+        player.vx = 0;
+        player.vy = 0;
+        player.grounded = true;
+        player.gravity = 0.6;
+        game.worldZoom = 1;
+      }
+
+      function initLevel3() {
+        platforms = [
+          makePlatform(90, height - 150, 180, 22, "", "rgba(255,255,255,0.04)", "#fff", 0, "rect"),
+          makePlatform(300, height - 220, 170, 20, "", "rgba(255,255,255,0.04)", "#fff", 0, "rect"),
+          makePlatform(560, height - 210, 190, 22, "", "rgba(255,255,255,0.04)", "#fff", 0, "rect"),
+          makePlatform(820, height - 240, 170, 20, "", "rgba(255,255,255,0.04)", "#fff", 0, "rect")
+        ];
+        collectibles = [];
+        player.x = 120;
+        player.y = 240;
+        player.vx = 0;
+        player.vy = 0;
+        player.grounded = false;
+        player.gravity = 0.15;
+        player.throwCooldown = 0;
+
+        boss = {
+          x: width * 0.72,
+          y: height * 0.42,
+          baseRadius: 120,
+          rotY: 0,
+          shootTimer: 0,
+          hp: 1,
+          alive: true
+        };
+
+        bossTarget = {
+          x: width * 0.72,
+          y: height * 0.42,
+          r: 115,
+          hp: 8,
+          alive: true,
+          broken: false
+        };
+
+        bossDestroyed = false;
+        bossDefeatTime = 0;
+        game.worldZoom = 1;
+      }
+
+      function startLevel(levelIndex) {
+        game.levelIndex = levelIndex;
+        game.levelPhi = 0;
+        const names = [
+          "1+1+1...",
+          "φ SPIRAL",
+          "GOLDEN RECTANGLES",
+          "ICOSAHEDRON"
+        ];
+        game.levelName = names[levelIndex];
+        switch (levelIndex) {
+          case 0: initLevel0(); break;
+          case 1: initLevel1(); break;
+          case 2: initLevel2(); break;
+          case 3: initLevel3(); break;
+        }
+        overlay.classList.remove("hidden");
+        setOverlay("PHI RUNNER", ["Collect the remaining φ", "press space to jump"], true);
+        setTimeout(() => {
+          overlay.classList.add("hidden");
+        }, 1200);
+        updateHud();
+      }
+
+      function nextLevel() {
+        if (game.levelIndex < 3) {
+          startLevel(game.levelIndex + 1);
+        } else {
+          // final win
+          game.winScreen = true;
+          resetButton.classList.add("visible");
+        }
+      }
+
+      function addPhi() {
+        game.totalPhi += 1;
+        game.levelPhi += 1;
+        spawnParticles(player.x, player.y, "#FFD166", 16, 2.8);
+        if (game.levelPhi >= 5) {
+          game.levelClearTimer = 18;
+          // slight delay to let player feel the clear
+          setTimeout(() => {
+            if (game.levelIndex < 3) {
+              nextLevel();
+            }
+          }, 320);
+        }
+        updateHud();
+      }
+
+      function collectNearbyPhi() {
+        collectibles.forEach((c) => {
+          if (c.collected) return;
+          const dx = player.x + player.w / 2 - c.x;
+          const dy = player.y + player.h / 2 - c.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist < (player.w + c.r) * 0.8) {
+            c.collected = true;
+            addPhi();
+          }
+        });
+      }
+
+      function playerJump() {
+        if (game.levelIndex === 3) {
+          if (!player.grounded) {
+            // mid-air throw in boss stage
+            throwPhi();
+            return;
+          }
+        }
+        if (player.grounded || game.levelIndex === 3) {
+          player.vy = -player.jumpStrength;
+          player.grounded = false;
+          spawnParticles(player.x + player.w / 2, player.y + player.h, "#FF6B00", 12, 2.6);
+        }
+      }
+
+      function throwPhi() {
+        if (player.throwCooldown > 0) return;
+        const dir = keys.left ? -1 : keys.right ? 1 : player.facing;
+        const x = player.x + player.w / 2 + dir * 18;
+        const y = player.y + player.h / 2;
+
+        projectiles.push({
+          x, y, vx: dir * 8.5, vy: -0.6,
+          r: 8, color: "#FFD166", life: 90
+        });
+
+        player.throwCooldown = 220;
+        spawnParticles(x, y, "#FFD166", 8, 2);
+      }
+
+      function applyPlatformCollisions() {
+        player.grounded = false;
+        for (let i = 0; i < platforms.length; i++) {
+          const p = platforms[i];
+          const px = p.x;
+          const py = p.y;
+          const pw = p.w;
+          const ph = p.h;
+
+          const prevBottom = player.y - player.vy + player.h;
+          const nextBottom = player.y + player.h + player.vy;
+
+          // rect collision
+          const intersectsX = player.x + player.w > px && player.x < px + pw;
+          const intersectsY = player.y + player.h > py && player.y < py + ph;
+
+          if (intersectsX && intersectsY && player.vy >= 0 && prevBottom <= py + 10) {
+            player.y = py - player.h;
+            player.vy = 0;
+            player.grounded = true;
+          }
+        }
+      }
+
+      function updatePlayer(dt) {
+        const moveDir = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+
+        if (moveDir !== 0) {
+          player.facing = moveDir;
+        }
+
+        if (game.levelIndex === 3) {
+          player.gravity = 0.15;
+          player.vx += moveDir * 0.45 * dt;
+          player.vx *= 0.82;
+          player.x += player.vx * dt * 3.2;
+
+          if (player.x < 10) player.x = 10;
+          if (player.x > width - 80) player.x = width - 80;
+
+          player.vy += player.gravity * dt;
+          player.y += player.vy * dt * 2.8;
+
+          if (player.y < 30) player.y = 30;
+          if (player.y > height - 80) {
+            player.y = height - 80;
+            player.vy = 0;
+            player.grounded = true;
+          }
+
+          // floating behavior in L3
+          if (player.grounded && player.vy > 0.3) player.vy *= 0.7;
+
+        } else {
+          player.gravity = 0.6;
+          player.vx += moveDir * 0.62 * dt;
+          player.vx *= 0.8;
+          player.x += player.vx * dt * 2.7;
+
+          if (player.x < 10) {
+            player.x = 10;
+            player.vx *= 0.2;
+          }
+          if (player.x > width + 200) {
+            player.x = width + 200;
+            player.vx *= 0.2;
+          }
+
+          player.vy += player.gravity * dt;
+          player.y += player.vy * dt * 2.3;
+
+          // level ground/floating platform collisions
+          player.grounded = false;
+
+          for (let i = 0; i < platforms.length; i++) {
+            const p = platforms[i];
+            const prevBottom = player.y - player.vy * dt * 2.3 + player.h;
+            if (player.x + player.w > p.x && player.x < p.x + p.w &&
+                player.y + player.h <= p.y + 14 && player.y + player.h >= p.y - 5 && player.vy >= 0 && prevBottom <= p.y + 10) {
+              player.y = p.y - player.h;
+              player.vy = 0;
+              player.grounded = true;
+            }
+          }
+
+          if (player.y > height + 120) {
+            player.y = height - 120;
+            player.vy = 0;
+            player.grounded = true;
+          }
+        }
+
+        if (player.throwCooldown > 0) player.throwCooldown -= dt * 16.67;
+
+        player.frame += dt * 0.75;
+      }
+
+      function updateCollectibles() {
+        for (let i = 0; i < collectibles.length; i++) {
+          const c = collectibles[i];
+          if (c.collected) continue;
+          c.y += Math.sin((performance.now() * 0.004) + c.bob) * 0.3;
+        }
+      }
+
+      function drawBackground() {
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, width, height);
+
+        // faint grid
+        ctx.strokeStyle = "rgba(255,255,255,0.08)";
+        ctx.lineWidth = 1;
+        for (let x = 0; x < width; x += 32) {
+          ctx.beginPath();
+          ctx.moveTo(x, 0);
+          ctx.lineTo(x, height);
+          ctx.stroke();
+        }
+        for (let y = 0; y < height; y += 32) {
+          ctx.beginPath();
+          ctx.moveTo(0, y);
+          ctx.lineTo(width, y);
+          ctx.stroke();
+        }
+
+        // manual math line treatment
+        if (game.levelIndex === 0) {
+          ctx.strokeStyle = "rgba(255,255,255,0.8)";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.moveTo(40, height - 60);
+          ctx.lineTo(width - 40, height - 60);
+          ctx.stroke();
+
+          ctx.fillStyle = "rgba(255,255,255,0.2)";
+          ctx.font = '18px "Space Mono", monospace';
+          ctx.fillText("... + 1/(1+1/...", 60, height - 100);
+        }
+
+        if (game.levelIndex === 1) {
+          // faint Fibonacci spiral
+          ctx.strokeStyle = "rgba(255,255,255,0.18)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          const cx = width * 0.5;
+          const cy = height * 0.52;
+          const start
